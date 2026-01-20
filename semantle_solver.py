@@ -4,9 +4,11 @@ import re
 import time
 import sys
 import random
+import unicodedata
 from urllib.parse import quote, urlencode
 from typing import TypedDict
 from bs4 import BeautifulSoup
+
 
 # Unicode Right-to-Left Mark for proper Hebrew display
 RTL_MARK = '\u200F'
@@ -232,7 +234,7 @@ class SemantleSolver:
                                reverse=True)
         return sorted_history[:n]
     
-    def show_top_matches(self, n: int = 10) -> None:
+    def show_top_matches(self, n: int = 15) -> None:
         """Display top N matches"""
         top_matches = self.get_top_matches(n)
         if not top_matches:
@@ -253,11 +255,18 @@ class SemantleSolver:
         print("="*60 + "\n")
     
 
+    def remove_niqqud(self, text: str) -> str:
+        return ''.join(
+            ch for ch in text
+            if unicodedata.category(ch) != 'Mn'
+        )
+
     def extract_words_from_wikitext_phrase(self, base_word: str, phrase, related_words, max_words: int):
-        phrase = phrase.replace('(', '').replace(')', '').strip()
+        phrase = phrase.replace('(', ' ').replace(')', ' ').replace('|', ' ').replace(':', ' ').strip()
 
         for word in phrase.split():
-            if (len(phrase) < 2 or not self.is_hebrew(phrase) or word == base_word or word in self.tried_words or word in related_words):
+            word = self.remove_niqqud(word)
+            if (len(word) < 2 or not self.is_hebrew(word) or word == base_word or word in self.tried_words or word in related_words):
                 continue
             related_words.append(word)
 
@@ -265,7 +274,7 @@ class SemantleSolver:
                 break
 
 
-    def get_cached_related_words(self, word: str, max_words: int =30):
+    def get_cached_related_words(self, word: str, max_words: int = 30):
         """Get related words from cache if available"""
         if word in self.wiktionary_cache:
              return self.wiktionary_cache[word]
@@ -365,10 +374,10 @@ class SemantleSolver:
             
             for link in links:
                 # Remove pipe ([[word|display]]) and parentheses
-                base = link.split('|')[0]
-                self.extract_words_from_wikitext_phrase(word, base, related_words, max_words)
+                #base = link.split('|')[0]
+                self.extract_words_from_wikitext_phrase(word, link, related_words, max_words)
 
-            print(f"[DEBUG] After processing links, found {len(related_words)} related words")
+            print(f"[DEBUG] After processing links, found {len(related_words)} related words - {related_words}")
             
             # Also extract any Hebrew words from the wikitext content
             if len(related_words) < max_words:
@@ -380,9 +389,11 @@ class SemantleSolver:
                 for found_word in all_hebrew_words:
                     self.extract_words_from_wikitext_phrase(word, found_word, related_words, max_words)
            
-            print(f"[DEBUG] Final result: {len(related_words)} related words: {related_words}")
+
+            final = related_words[:max_words]
+            print(f"[DEBUG] Final result: {len(related_words)} related words, returning {max_words}: {final}")
             #time.sleep(1000)
-            return related_words[:max_words]
+            return final
             
         except requests.exceptions.RequestException as e:
             print(f"[DEBUG] RequestException: {e}")
@@ -400,13 +411,16 @@ class SemantleSolver:
 
 
     def get_word_to_try(self) -> str:
-        top_matches = self.get_top_matches(5)
+        top_matches = self.get_top_matches(50)
         for top_match in top_matches:
             word = top_match['word']
-            related_words = self.get_cached_related_words(word, 150)
+            related_words = self.get_cached_related_words(word, 30)
             available_words = [w for w in related_words if w not in self.tried_words]
             if len(available_words) > 0:
                 return random.choice(available_words)
+
+        if self.seed_word and self.seed_word not in self.tried_words:
+            return self.seed_word
             
         return self.get_random_word()
 
@@ -430,12 +444,20 @@ class SemantleSolver:
                     print(f"\n{'='*60}")
                     print(f"Progress Update (Total words tried: {len(self.tried_words)})")
                     print("="*60)
-                    self.show_top_matches(10)
+                    self.show_top_matches(15)
 
                 if similarity == 100:
                     print("🎉 FOUND THE ANSWER! 🎉")
                     return result['word']
-                    
+
+
+            if len(self.tried_words) % 200 == 0:
+                words_before = len(self.wiktionary_cache)
+                total_before = sum(len(v) for v in self.wiktionary_cache.values())
+                self.wiktionary_cache.clear()
+                words_after = len(self.wiktionary_cache)
+                total_after = sum(len(v) for v in self.wiktionary_cache.values())
+                print(f"Doing a flush of the wikitionary cache - size bfore {words_before}/{total_before} size after {words_after}/{total_after} ")
             # Small delay to avoid overwhelming the API
             time.sleep(0.1)
 
