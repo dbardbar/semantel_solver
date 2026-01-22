@@ -536,7 +536,7 @@ class SemantleSolver:
             time.sleep(0.1)
 
 
-    def flush_dictionary(dictionary_to_flush: dict[str, list[str]], description: str) -> None:
+    def flush_dictionary(self, dictionary_to_flush: dict[str, list[str]], description: str) -> None:
         words_before = len(dictionary_to_flush)
         total_before = sum(len(v) for v in dictionary_to_flush.values())
         dictionary_to_flush.clear()
