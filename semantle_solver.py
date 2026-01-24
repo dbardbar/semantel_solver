@@ -22,9 +22,10 @@ class WordToTry(TypedDict):
 class GuessResult(TypedDict):
     word: str
     similarity: float
-    distance: float
+    distance: int
     origin: str
     origin_source: str
+    guess_number: int
 
 class SemantleSolver:
     def __init__(self):
@@ -135,6 +136,7 @@ class SemantleSolver:
         word = word_to_try["word"]
         origin = word_to_try["origin"]
         origin_source = word_to_try["origin_source"]
+
         if word in self.tried_words:
             return None
         
@@ -151,6 +153,7 @@ class SemantleSolver:
                 return self.submit_guess(word_to_try, sleep_time*1.5)
 
             self.tried_words.add(word)
+            guess_number = len(self.tried_words)
 
             # Handle 400 status code (word not found)
             if response.status_code == 400:
@@ -160,14 +163,14 @@ class SemantleSolver:
 
                     result: GuessResult = {
                         "word": word,
-                        "similarity": -100.0,
-                        "distance": -100.0,
+                        "similarity": -1,
+                        "distance": -1,
                         "origin": origin,
-                        "origin_source": origin_source
+                        "origin_source": origin_source,
+                        "guess_number": guess_number
                     }
                     self.guess_history.append(result)
                     return result
-                    # return None
                 else:
                     # Other 400 error
                     print(f"API error (400): {error_text}")
@@ -182,9 +185,10 @@ class SemantleSolver:
                result: GuessResult = {
                    "word": word,
                    "similarity": float(raw.get("similarity", 0.0)),
-                   "distance": float(raw.get("distance", 0.0)),
+                   "distance": int(raw.get("distance", 0)),
                    "origin": origin,
-                   "origin_source": origin_source
+                   "origin_source": origin_source,
+                   "guess_number": guess_number
                }
                self.guess_history.append(result)
                return result
@@ -220,23 +224,7 @@ class SemantleSolver:
             return text_str[::-1]
         return text_str
     
-    def display_result(self, result: GuessResult) -> None:
-        """Display a formatted result from the API"""
-        if result is None:
-            print("No result to display")
-            return
-        
-        formatted_word = self.format_hebrew(result['word'])
-        formatted_origin = self.format_hebrew(result['origin'])
 
-        print(
-            f"{formatted_word:<15} | "
-            f"Similarity: {result['similarity']:8.1f} | "
-            f"Distance: {result['distance']:8.1f} | "
-            f"Guess #: {len(self.tried_words):3d} | "
-            f"Origin #: {formatted_origin} ({result['origin_source']}) "
-        )
-    
     def get_top_matches(self, n: int = 10) -> list[GuessResult]:
         """Get top N matches by similarity"""
         sorted_history = sorted(self.guess_history, 
@@ -244,8 +232,18 @@ class SemantleSolver:
                                reverse=True)
         return sorted_history[:n]
     
+
+    def display_result(self, result: GuessResult) -> None:
+        if result is None:
+            print("No result to display")
+            return
+        word = self.format_hebrew(result['word'])
+        similarity = result['similarity']
+        distance = result['distance']
+        origin = self.format_hebrew(result['origin'])
+        print(f"#{result['guess_number']:<4} {word:20} Sim: {similarity:6.2f} Dist: {distance:4} Origin: {origin} ({result['origin_source']})" )
+    
     def show_top_matches(self, n: int = 15) -> None:
-        """Display top N matches"""
         top_matches = self.get_top_matches(n)
         if not top_matches:
             print("No guesses made yet.")
@@ -253,14 +251,23 @@ class SemantleSolver:
         
         print("\n" + "="*75)
         print(f"TOP {len(top_matches)} BEST MATCHES")
-        print("="*60)
-        for i, guess in enumerate(top_matches, 1):
-            word = self.format_hebrew(guess['word'])
-            similarity = guess['similarity']
-            distance = guess['distance']
-            origin = self.format_hebrew(guess['origin'])
-            print(f"{i:2}. {word:20} Similarity: {similarity:6.2f} Distance: {distance:7} Origin: {origin} ({guess['origin_source']})")
+        print("="*75)
+        for guess in top_matches:
+            self.display_result(guess)
         print("="*75 + "\n")
+
+        
+    def print_word_path(self, result: GuessResult) -> None: 
+        self.display_result(result)
+        origin = result["origin"]
+        if len(origin) == 0:
+            return
+
+        for r in self.guess_history:
+            if r["word"] == origin:
+                self.print_word_path(r)
+            
+        return
     
 
     def remove_niqqud(self, text: str) -> str:
@@ -513,6 +520,8 @@ class SemantleSolver:
             result = self.submit_guess(word_to_try)
             self.tried_words.add(word_to_try["word"])
 
+
+
             if result:
                 similarity = result['similarity']
                 self.display_result(result)
@@ -524,6 +533,8 @@ class SemantleSolver:
 
                 if similarity == 100:
                     print("🎉 FOUND THE ANSWER! 🎉")
+                    print("Path:")
+                    self.print_word_path(result)
                     return result['word']
 
 
