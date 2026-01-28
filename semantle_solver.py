@@ -29,25 +29,29 @@ class GuessResult(TypedDict):
 
 class SemantleSolver:
     def __init__(self):
-        self.api_url = "https://semantle.ishefi.com/api/distance"
+        self.api_url_hebrew = "https://semantle.ishefi.com/api/distance"
+        self.api_url_english = "https://server.semantle.com/similarity/__WORD__/heel/en"
         self.guess_history: list[GuessResult] = []
         self.tried_words: set[str] = set()  # Track words already tried
-        self.hebrew_corpus: list[str] = []  # Hebrew word corpus for random guesses
+        self.corpus: list[str] = []  # Hebrew word corpus for random guesses
         self.corpus_loaded = False
         self.wikipedia_cache: dict[str, list[str]] = {}
         self.wikipedia_exhausted: list[str] = []
         self.milog_cache: dict[str, list[str]] = {}
         self.milog_exhausted: list[str] = []
         self.seed_word = ""
+        self.language = "hebrew"
     
-    def load_hebrew_corpus(self) -> None:
-        """Load Hebrew word corpus from online source or local file"""
+    def load_corpus(self) -> None:
         if self.corpus_loaded:
             return
         
-        print("Loading Hebrew word corpus...")
+        print("Loading word corpus...")
         
-        word_files = [ "wordlist.txt" ]
+        if self.language == "hebrew":
+            word_files = [ "wordlist_he.txt" ]
+        else:
+            word_files = [ "wordlist_en.txt" ]
                 
         # Also include a basic list of common Hebrew words as fallback
         common_hebrew_words = [
@@ -76,6 +80,15 @@ class SemantleSolver:
             "בונה", "הורס", "פותח", "סוגר", "נותן", "לוקח", "מביא", "מוביל", "שולח", "מקבל",
             "קונה", "מוכר", "שלם", "מקבל", "מתחיל", "מסיים", "מתחיל", "עוצר", "ממשיך", "עוזב"
         ]
+
+        common_english_words = [ "war", "god", "help", "world", "hand"
+
+        ]
+
+        if self.language == "hebrew":
+            common_words = common_hebrew_words
+        if self.language == "english":
+            common_words = common_english_words
         
         words_set = set()
 
@@ -84,29 +97,27 @@ class SemantleSolver:
                 with open(word_file, 'r', encoding='utf-8') as f:
                     for line in f:
                         word = line.strip()
-                        if word and self.is_hebrew(word) and len(word) >= 2:
-                            words_set.add(word)
+                        words_set.add(word)
             except Exception as e:
                 continue
             print(f"Loaded {len(words_set)} words from {word_file}")
             break
 
         # Add common words as fallback
-        for word in common_hebrew_words:
-            if self.is_hebrew(word) and len(word) >= 2:
-                words_set.add(word)
+        for word in common_words:
+            words_set.add(word)
         
-        self.hebrew_corpus = list(words_set)
+        self.corpus = list(words_set)
         self.corpus_loaded = True
-        print(f"Hebrew corpus loaded: {len(self.hebrew_corpus)} words available")
+        print(f"Corpus loaded: {len(self.corpus)} words available")
     
     def get_random_words_from_corpus(self, count: int =5) -> list[str]:
-        """Get random words from Hebrew corpus, excluding already tried words"""
+        """Get random words from corpus, excluding already tried words"""
         if not self.corpus_loaded:
-            self.load_hebrew_corpus()
+            self.load_corpus()
         
         # Filter out already tried words
-        available_words = [w for w in self.hebrew_corpus if w not in self.tried_words]
+        available_words = [w for w in self.corpus if w not in self.tried_words]
         
         if not available_words:
             return []
@@ -118,21 +129,10 @@ class SemantleSolver:
     def get_random_word(self) -> str:
         """Get a random seed word from the corpus for autonomous solving"""
         if not self.corpus_loaded:
-            self.load_hebrew_corpus()
-        return random.choice(self.hebrew_corpus)
+            self.load_corpus()
+        return random.choice(self.corpus)
     
     def submit_guess(self, word_to_try: WordToTry, sleep_time: float = 5) -> GuessResult | None:
-        """
-        Submit a Hebrew word guess to the API
-        
-        Args:
-            word: Hebrew word string to guess
-            
-        Returns:
-            GuessResult: Response from the API containing similarity, distance, etc.
-            None: If word not found or error occurred
-        """
-        # Check if already tried
         word = word_to_try["word"]
         origin = word_to_try["origin"]
         origin_source = word_to_try["origin_source"]
@@ -142,7 +142,10 @@ class SemantleSolver:
         
         # URL encode the Hebrew word
         encoded_word = quote(word)
-        url = f"{self.api_url}?word={encoded_word}"
+        if self.language == "hebrew":
+            url = f"{self.api_url_hebrew}?word={encoded_word}"
+        if self.language == "english":
+            url = self.api_url_english.replace("__WORD__", encoded_word)
         
         try:
             response = requests.get(url)
@@ -155,8 +158,7 @@ class SemantleSolver:
             self.tried_words.add(word)
             guess_number = len(self.tried_words)
 
-            # Handle 400 status code (word not found)
-            if response.status_code == 400:
+            if response.status_code == 400 or response.status_code == 404:
                 error_text = response.text
                 if "Word not found" in error_text:
                     # print(f"Word not found in game dictionary: {self.format_hebrew(word)}")
@@ -176,24 +178,30 @@ class SemantleSolver:
                     print(f"API error (400): {error_text}")
                     return None
             
-            # Raise for other HTTP errors
             response.raise_for_status()
             data = response.json()
-            
-            if isinstance(data, list) and data:
-               raw = data[0]
-               result: GuessResult = {
-                   "word": word,
-                   "similarity": float(raw.get("similarity", 0.0)),
-                   "distance": int(raw.get("distance", 0)),
-                   "origin": origin,
-                   "origin_source": origin_source,
-                   "guess_number": guess_number
-               }
-               self.guess_history.append(result)
-               return result
 
-            return None
+            if self.language == "hebrew":
+                similarity = float(data[0].get("similarity", 0.0))
+                distance = int(data[0].get("distance", 0))
+            if self.language == "english":
+                similarity = float(data.get("similarity", 0.0))
+                if data.get("percentile") == None:
+                    distance = 0
+                else:
+                    distance = int(data.get("percentile", 0))
+
+
+            result: GuessResult = {
+                "word": word,
+                "similarity": similarity,
+                "distance": distance,
+                "origin": origin,
+                "origin_source": origin_source,
+                "guess_number": guess_number
+            }
+            self.guess_history.append(result)
+            return result
                 
         except requests.exceptions.HTTPError as e:
             print(f"HTTP error making API request: {e}")
@@ -262,11 +270,9 @@ class SemantleSolver:
         origin = result["origin"]
         if len(origin) == 0:
             return
-
         for r in self.guess_history:
             if r["word"] == origin:
-                self.print_word_path(r)
-            
+                self.print_word_path(r)          
         return
     
 
@@ -276,20 +282,31 @@ class SemantleSolver:
             if unicodedata.category(ch) != 'Mn'
         )
 
-    def extract_words_from_wikitext_phrase(self, base_word: str, phrase, related_words, max_words: int):
-        phrase = phrase.replace('(', ' ').replace(')', ' ').replace('|', ' ').replace(':', ' ').strip()
+    SPECIAL_CHARS = "־()#|:[]{}<>.,;!?+-=_\"'"
+
+    TRANS_TABLE = str.maketrans({c: " " for c in SPECIAL_CHARS})
+
+
+    def extract_words_from_wikitext_phrase(self, base_word: str, phrase, related_words, max_words: int) -> None:
+        # phrase = phrase.replace('(', ' ').replace(')', ' ').replace('|', ' ').replace(':', ' ').strip()
+        phrase = phrase.translate(self.TRANS_TABLE).strip()
 
         for word in phrase.split():
             word = self.remove_niqqud(word)
-            if (len(word) < 2 or not self.is_hebrew(word) or word == base_word or word in self.tried_words or word in related_words):
+            if self.language == "english":
+                word = word.lower()
+            if self.language == "hebrew" and not self.is_hebrew(word):
                 continue
-            related_words.append(word)
 
+            if (len(word) < 2 or word == base_word or word in self.tried_words or word in related_words):
+                continue
+
+            related_words.append(word)
             if len(related_words) >= max_words:
                 break
 
 
-    def get_cached_milog_related_words(self, word: str, max_words: int = 30):
+    def get_cached_milog_related_words(self, word: str, max_words: int = 30) -> list[str]:
         """Get related words from cache if available"""
 
         if word in self.milog_exhausted:
@@ -307,9 +324,7 @@ class SemantleSolver:
 
 
 
-    def get_cached_wikipedia_related_words(self, word: str, max_words: int = 30):
-        """Get related words from cache if available"""
-
+    def get_cached_wikipedia_related_words(self, word: str, max_words: int = 30) -> list[str]:
         if word in self.wikipedia_exhausted:
             return []
 
@@ -369,10 +384,13 @@ class SemantleSolver:
             list: List of related Hebrew words
         """
         
-        print(f"\n[DEBUG] Wiktionary lookup for word: {self.format_hebrew(word)} (raw: {word}) max_word {max_words}")
+        print(f"\n[DEBUG] Wiktionary lookup for word: {self.format_hebrew(word)} max_word {max_words}")
         
         # Use MediaWiki Action API for Hebrew Wiktionary
-        api_url = "https://he.wikipedia.org/w/api.php"
+        if self.language == "hebrew":
+            api_url = "https://he.wikipedia.org/w/api.php"
+        if self.language == "english":
+            api_url = "https://en.wikipedia.org/w/api.php"
         
         # Headers to avoid 403 errors
         headers = {
@@ -436,8 +454,6 @@ class SemantleSolver:
             # print(f"[DEBUG] Wikitext length: {len(wikitext)} characters")
             # print(f"[DEBUG] Wikitext preview (first 500 chars): {wikitext[:300]}")
             
-            # Hebrew Unicode range: 0590-05FF
-            hebrew_pattern = re.compile(r'[\u0590-\u05FF]+')
             
             # Extract Hebrew words from wikitext
             # Look for links [[word]] which are common in wikitext
@@ -452,17 +468,19 @@ class SemantleSolver:
                 self.extract_words_from_wikitext_phrase(word, link, related_words, max_words)
 
             print(f"[DEBUG] After processing links, found {len(related_words)} related words - {related_words}")
-            
+
             # Also extract any Hebrew words from the wikitext content
-            if len(related_words) < max_words:
-                print(f"[DEBUG] Need more words, extracting all Hebrew words from wikitext...")
+            # TODO - think how to extract from English wiki
+            if self.language == "hebrew" and len(related_words) < max_words:
+                print(f"[DEBUG] Need more words, extracting all words from wikitext...")
+                # Hebrew Unicode range: 0590-05FF
+                hebrew_pattern = re.compile(r'[\u0590-\u05FF]+')
                 all_hebrew_words = hebrew_pattern.findall(wikitext)
-                print(f"[DEBUG] Found {len(all_hebrew_words)} total Hebrew words in wikitext")
+                print(f"[DEBUG] Found {len(all_hebrew_words)} total words in wikitext")
                 print(f"[DEBUG] First 20 Hebrew words: {all_hebrew_words[:20]}")
                 
                 for found_word in all_hebrew_words:
                     self.extract_words_from_wikitext_phrase(word, found_word, related_words, max_words)
-           
 
             final = related_words[:max_words]
             print(f"[DEBUG] Final result: {len(related_words)} related words, returning {max_words}: {final}")
@@ -494,6 +512,8 @@ class SemantleSolver:
                 chosen_word = random.choice(available_words)
                 return WordToTry(word=chosen_word, origin=word, origin_source="wiki")
 
+            if not self.language == "hebrew":
+                continue
             related_words = self.get_cached_milog_related_words(word, 30)
             available_words = [w for w in related_words if w not in self.tried_words]
             if len(available_words) > 0:
@@ -507,7 +527,6 @@ class SemantleSolver:
         random_word = self.get_random_word()
         return WordToTry(word=random_word, origin="", origin_source="random")
 
-
     
     def auto_solve(self) -> str:
         print(f"Starting autonomous solving with seed word: {self.format_hebrew(self.seed_word)}")
@@ -515,23 +534,20 @@ class SemantleSolver:
        
         # Continue autonomously until we find the answer or run out of words
         while True:
-
             word_to_try = self.get_word_to_try()
             result = self.submit_guess(word_to_try)
             self.tried_words.add(word_to_try["word"])
 
-
-
             if result:
-                similarity = result['similarity']
+                distance = result['distance']
                 self.display_result(result)
-                if similarity == 100 or len(self.tried_words) % 15 == 0:
+                if distance == 1000 or len(self.tried_words) % 15 == 0:
                     print(f"\n{'='*60}")
                     print(f"Progress Update (Total words tried: {len(self.tried_words)})")
                     print("="*60)
                     self.show_top_matches(15)
 
-                if similarity == 100:
+                if distance == 1000:
                     print("🎉 FOUND THE ANSWER! 🎉")
                     print("Path:")
                     self.print_word_path(result)
@@ -541,7 +557,6 @@ class SemantleSolver:
             if len(self.tried_words) % 200 == 0:
                 self.flush_dictionary(self.wikipedia_cache, "wiki")
                 self.flush_dictionary(self.milog_cache, "milog")
-
 
             # Small delay to avoid overwhelming the API
             time.sleep(0.1)
@@ -558,10 +573,14 @@ class SemantleSolver:
 def main():
     solver = SemantleSolver()
     
-    if len(sys.argv) > 1:
-        seed_word = ' '.join(sys.argv[1:])
+    arguments = sys.argv
+    if len(arguments) > 1 and arguments[1] == "english":
+        solver.language = "english"
+        arguments.pop(0)
+
+    if len(arguments) > 1:
+        seed_word = arguments[1]
         normalized_seed = solver.normalize_hebrew_input(seed_word)
-        #solver.get_cached_milog_related_words(normalized_seed, 30)
         solver.seed_word = normalized_seed
    
     solver.auto_solve()
