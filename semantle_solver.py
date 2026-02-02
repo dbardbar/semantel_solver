@@ -1,4 +1,3 @@
-from ast import List
 import requests
 import json
 import re
@@ -126,11 +125,12 @@ class SemantleSolver:
         sample_size = min(count, len(available_words))
         return random.sample(available_words, sample_size)
     
-    def get_random_word(self) -> str:
-        """Get a random seed word from the corpus for autonomous solving"""
-        if not self.corpus_loaded:
-            self.load_corpus()
-        return random.choice(self.corpus)
+    def get_random_unused_word(self) -> str | None:
+        words = self.get_random_words_from_corpus(1)
+        if len(words) > 0:
+            return words[0]
+        return None
+
     
     def submit_guess(self, word_to_try: WordToTry, sleep_time: float = 5) -> GuessResult | None:
         word = word_to_try["word"]
@@ -205,7 +205,6 @@ class SemantleSolver:
                 
         except requests.exceptions.HTTPError as e:
             print(f"HTTP error making API request: {e}")
-            self.tried_words.add(word)
             return None
         except requests.exceptions.RequestException as e:
             print(f"Error making API request: {e}")
@@ -339,6 +338,13 @@ class SemantleSolver:
         return related_words
 
 
+    def normalize_hebrew_token(self, text: str) -> str:
+        text = self.remove_niqqud(text)
+        text = text.replace('־', ' ')  # maqaf
+        return text.strip()
+
+    HEBREW_WORD_RE = re.compile(r'[\u05D0-\u05EA]{2,}')
+
     def get_related_words_from_milog(self, word: str, max_words: int) -> list[str]:
         api_url = "https://milog.co.il/"
         headers = {
@@ -353,14 +359,16 @@ class SemantleSolver:
             soup = BeautifulSoup(html, "lxml")
             #print(f"[DEBUG] milog raw content: {html}")
             raw_words = []
-            for div in soup.find_all("div", class_="sr_e"):
-                # print(f"[DEBUG] found div")
-                text = div.get_text(separator=" ", strip=True)
-                raw_words.extend(re.findall(r"\b\w+\b", text))
-
             related_words = []
-            for raw_word in raw_words:
-                self.extract_words_from_wikitext_phrase(word, raw_word, related_words, max_words)
+            for div in soup.find_all("div", class_="sr_e"):
+                text = div.get_text(separator=" ", strip=True)
+                text = self.normalize_hebrew_token(text)
+                for candidate in self.HEBREW_WORD_RE.findall(text):
+                    if (candidate == word or candidate in self.tried_words or candidate in related_words):
+                        continue
+                    related_words.append(candidate)
+                    if len(related_words) >= max_words:
+                        break
 
             final = related_words[:max_words]
             print(f"[DEBUG] Milog final result: {len(related_words)} related words, returning {max_words}: {final}")
@@ -502,7 +510,7 @@ class SemantleSolver:
             return []
 
 
-    def get_word_to_try(self) -> WordToTry:
+    def get_word_to_try_from_related_word(self, top_matches_to_search: int) -> WordToTry | None:
         top_matches = self.get_top_matches(70)
         for top_match in top_matches:
             word = top_match['word']
@@ -520,13 +528,22 @@ class SemantleSolver:
                 chosen_word = random.choice(available_words)
                 return WordToTry(word=chosen_word, origin=word, origin_source="milog")
 
+        return None
+
+    def get_word_to_try(self) -> WordToTry | None:
+        word_to_try = self.get_word_to_try_from_related_word(70)
+        if word_to_try:
+            return word_to_try
 
         if self.seed_word and self.seed_word not in self.tried_words:
             return WordToTry(word=self.seed_word, origin="", origin_source="seed")
             
-        random_word = self.get_random_word()
-        return WordToTry(word=random_word, origin="", origin_source="random")
+        random_word = self.get_random_unused_word()
+        if random_word:
+            return WordToTry(word=random_word, origin="", origin_source="random")
 
+        # Last ditch attempt - get ANY related word. Anything goes.
+        return self.get_word_to_try_from_related_word(1000000000)
     
     def auto_solve(self) -> str:
         print(f"Starting autonomous solving with seed word: {self.format_hebrew(self.seed_word)}")
@@ -535,8 +552,12 @@ class SemantleSolver:
         # Continue autonomously until we find the answer or run out of words
         while True:
             word_to_try = self.get_word_to_try()
+            if word_to_try == None:
+                print("Failed to find word. Exhausted all word sources")
+                return
+
             result = self.submit_guess(word_to_try)
-            self.tried_words.add(word_to_try["word"])
+            #self.tried_words.add(word_to_try["word"])
 
             if result:
                 distance = result['distance']
