@@ -47,6 +47,7 @@ class SemantleSolver:
         self.language = "hebrew"
         self.puzzle_number = 1460
         self.secret_word = ""
+        self.top_words_to_find_relations = 70
     
     def load_corpus(self) -> None:
         if self.corpus_loaded:
@@ -107,8 +108,26 @@ class SemantleSolver:
             "constitution", "literature", "poetry", "novel", "theatre",
             "cinema", "photography", "music", "orchestra", "jazz",
             "classicalmusic", "olympics", "football", "basketball",
-            "nutrition", "metabolism", "diabetes", "cancer",
-            "neuroscience", "consciousness"
+            "nutrition", "metabolism", "diabetes", "cancer", "neuroscience",
+             "consciousness", "biome", "fossil", "paleontology", "seismology", "glacier",
+            "hurricane", "tornado", "deforestation", "pollution", "renewableenergy",
+            "photosphere", "supernova", "exoplanet", "nebula", "darkmatter",
+            "stringtheory", "nanomaterials", "semiconductor", "blockchain",
+            "cryptocurrency", "cybersecurity", "dataanalysis", "bigdata",
+            "cloudcomputing", "internetofthings", "virtualreality", "augmentedreality",
+            "geneticengineering", "stemcells", "immunotherapy", "epidemiology",
+            "neuroplasticity", "behaviorism", "culturalstudies", "feminism",
+            "existentialism", "stoicism", "utilitarianism", "nihilism",
+            "monotheism", "polytheism", "hinduism", "shinto", "taoism",
+            "planetaryscience", "astrophysics", "cosmogony", "mechatronics",
+            "automationengineering", "algorithmics", "cryptography", "heuristics",
+            "supplychain", "macroeconomics", "microeconomics", "mercantilism",
+            "feudalism", "colonization", "decolonization", "suffrage",
+            "humanrights", "civilization", "mythopoeia", "epicpoetry",
+            "drama", "painting", "sculpture", "impressionism", "cubism",
+            "symphony", "opera", "ballet", "rugby", "cricket", "tennis",
+            "obesity", "hypertension", "cardiology", "oncology", "virology",
+            "cognitivebias", "memory", "learning", "neurotransmitter"
         ]
 
 
@@ -126,6 +145,7 @@ class SemantleSolver:
                         word = line.strip()
                         words_set.add(word)
             except Exception as e:
+                print(f"Exception while loading {word_file}")
                 continue
             print(f"Loaded {len(words_set)} words from {word_file}")
             break
@@ -553,12 +573,16 @@ class SemantleSolver:
         return None
 
     def get_word_to_try(self) -> WordToTry | None:
-        word_to_try = self.get_word_to_try_from_related_word(70)
+        word_to_try = self.get_word_to_try_from_related_word(self.top_words_to_find_relations)
         if word_to_try:
             return word_to_try
 
         if self.seed_word and self.seed_word not in self.tried_words:
             return WordToTry(word=self.seed_word, origin="", origin_source="seed")
+
+        # This is to avoid going too much into the random words if there are no wiki articles for top words
+        self.top_words_to_find_relations += 1
+        print(f"Increasing the top words to fins relations from to {self.top_words_to_find_relations}")
             
         random_word = self.get_random_unused_word()
         if random_word:
