@@ -1,3 +1,4 @@
+import argparse
 import requests
 import json
 import re
@@ -5,9 +6,12 @@ import time
 import sys
 import random
 import unicodedata
+from datetime import datetime, timedelta, date
+from zoneinfo import ZoneInfo
 from urllib.parse import quote, urlencode
 from typing import TypedDict
 from bs4 import BeautifulSoup
+
 
 
 # Unicode Right-to-Left Mark for proper Hebrew display
@@ -29,7 +33,8 @@ class GuessResult(TypedDict):
 class SemantleSolver:
     def __init__(self):
         self.api_url_hebrew = "https://semantle.ishefi.com/api/distance"
-        self.api_url_english = "https://server.semantle.com/similarity/__WORD__/heel/en"
+        self.api_url_english = "https://server.semantle.com/similarity/__WORD__/__SECRET__/en"
+        #                       https://server.semantle.com/similarity/half/reserve/en
         self.guess_history: list[GuessResult] = []
         self.tried_words: set[str] = set()  # Track words already tried
         self.corpus: list[str] = []  # Hebrew word corpus for random guesses
@@ -40,6 +45,8 @@ class SemantleSolver:
         self.milog_exhausted: list[str] = []
         self.seed_word = ""
         self.language = "hebrew"
+        self.puzzle_number = 1460
+        self.secret_word = ""
     
     def load_corpus(self) -> None:
         if self.corpus_loaded:
@@ -145,7 +152,7 @@ class SemantleSolver:
         if self.language == "hebrew":
             url = f"{self.api_url_hebrew}?word={encoded_word}"
         if self.language == "english":
-            url = self.api_url_english.replace("__WORD__", encoded_word)
+            url = self.api_url_english.replace("__WORD__", encoded_word).replace("__SECRET__", self.secret_word)
         
         try:
             response = requests.get(url)
@@ -214,13 +221,7 @@ class SemantleSolver:
         if not text:
             return False
         return all('\u0590' <= char <= '\u05FF' for char in str(text))
-    
-    def normalize_hebrew_input(self, text: str) -> str:
-        """Normalize Hebrew input from terminal - reverse if needed for correct logical order"""
-        if not text or not self.is_hebrew(text):
-            return text
-        return text[::-1]
-    
+       
     def format_hebrew(self, text: str) -> str:
         """Format Hebrew text for proper display in terminal"""
         if not text or text == 'N/A':
@@ -545,10 +546,40 @@ class SemantleSolver:
         # Last ditch attempt - get ANY related word. Anything goes.
         return self.get_word_to_try_from_related_word(1000000000)
     
+    def get_english_secret_word(self) -> str:
+        url = f"https://server.semantle.com/semantle/game/{self.puzzle_number}/en"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        #print(data)
+        secret_word = data['secretWord']
+        if secret_word is None or len(secret_word) < 1:
+            raise Exception
+        #print(f"Secret word is {secret_word}")
+        return secret_word
+
+    def calculate_english_puzzle_number(self) -> int:
+        START_DATE = date(2022, 1, 29)
+        ROLLOVER_HOUR = 20  # 8 PM Eastern
+        tz = ZoneInfo("America/New_York")
+        now_ny = datetime.now(tz)
+        if now_ny.hour < ROLLOVER_HOUR:
+            game_date = now_ny.date() - timedelta(days=1)
+        else:
+            game_date = now_ny.date()
+
+        return (game_date - START_DATE).days + 1
+
+
     def auto_solve(self) -> str:
         print(f"Starting autonomous solving with seed word: {self.format_hebrew(self.seed_word)}")
+        if self.language == "english":
+            if self.puzzle_number == None:
+                self.puzzle_number = self.calculate_english_puzzle_number()
+            print(f"Solving English puzzle number {self.puzzle_number}")
+            self.secret_word = self.get_english_secret_word()
         print("="*70)
-       
+            
         # Continue autonomously until we find the answer or run out of words
         while True:
             word_to_try = self.get_word_to_try()
@@ -591,21 +622,63 @@ class SemantleSolver:
 
 
 
-def main():
-    solver = SemantleSolver()
-    
-    arguments = sys.argv
-    if len(arguments) > 1 and arguments[1] == "english":
-        solver.language = "english"
-        arguments.pop(0)
 
-    if len(arguments) > 1:
-        seed_word = arguments[1]
-        normalized_seed = solver.normalize_hebrew_input(seed_word)
-        solver.seed_word = normalized_seed
-   
+class SolverOptions(TypedDict):
+    language: str
+    seed_word: str | None
+    puzzle_number: int | None
+
+
+def normalize_hebrew_input(text: str) -> str:
+    # keep simple for now; assumes Hebrew only
+    return text[::-1]
+
+
+def parse_args() -> SolverOptions:
+    parser = argparse.ArgumentParser(
+        description="Autonomous Semantle solver (Hebrew / English)"
+    )
+
+    parser.add_argument(
+        "-l", "--language",
+        choices=["hebrew", "english"],
+        default="hebrew",
+        help="Game language (default: hebrew)"
+    )
+
+    parser.add_argument(
+        "-s", "--seed",
+        metavar="WORD",
+        help="Seed word to try first"
+    )
+
+    parser.add_argument(
+        "-n", "--number",
+        dest="puzzle_number",
+        type=int,
+        default=None,
+        help="English puzzle number to solve (default: auto find today)"
+    )
+
+    args = parser.parse_args()
+
+    seed_word = args.seed
+    if seed_word and args.language == "hebrew":
+        seed_word = normalize_hebrew_input(seed_word)
+
+    return SolverOptions(
+        language=args.language,
+        seed_word=seed_word,
+        puzzle_number=args.puzzle_number
+    ) 
+
+def main() -> None:
+    options = parse_args()
+    solver = SemantleSolver()
+    solver.language = options['language']
+    solver.seed_word = options['seed_word']
+    solver.puzzle_number = options['puzzle_number']
     solver.auto_solve()
-    return
 
 
 if __name__ == "__main__":
