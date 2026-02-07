@@ -87,9 +87,30 @@ class SemantleSolver:
             "קונה", "מוכר", "שלם", "מקבל", "מתחיל", "מסיים", "מתחיל", "עוצר", "ממשיך", "עוזב"
         ]
 
-        common_english_words = [ "war", "god", "help", "world", "hand"
-
+        common_english_words = [
+            "democracy", "photosynthesis", "gravity", "evolution", "renaissance",
+            "capitalism", "socialism", "algorithm", "encryption", "internet",
+            "neuron", "genome", "quantum", "relativity", "thermodynamics",
+            "volcano", "earthquake", "tsunami", "climate", "biodiversity",
+            "ecosystem", "antibiotic", "vaccination", "pandemic", "immunology",
+            "psychology", "cognition", "linguistics", "semantics", "syntax",
+            "philosophy", "ethics", "metaphysics", "logic", "aesthetics",
+            "mythology", "religion", "buddhism", "christianity", "islam",
+            "judaism", "astronomy", "galaxy", "planet", "asteroid",
+            "cosmology", "blackhole", "robotics", "automation",
+            "artificialintelligence", "machinelearning", "statistics",
+            "probability", "economics", "inflation", "recession", "currency",
+            "trade", "architecture", "engineering", "aerodynamics",
+            "nanotechnology", "biotechnology", "genetics", "archaeology",
+            "anthropology", "sociology", "urbanization", "globalization",
+            "imperialism", "colonialism", "nationalism", "revolution",
+            "constitution", "literature", "poetry", "novel", "theatre",
+            "cinema", "photography", "music", "orchestra", "jazz",
+            "classicalmusic", "olympics", "football", "basketball",
+            "nutrition", "metabolism", "diabetes", "cancer",
+            "neuroscience", "consciousness"
         ]
+
 
         if self.language == "hebrew":
             common_words = common_hebrew_words
